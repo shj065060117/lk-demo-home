@@ -1,0 +1,6 @@
+*{
+    margin: 0; padding: 0;
+}
+ul,li,dl,dt,dd{
+    list-style: none;
+}

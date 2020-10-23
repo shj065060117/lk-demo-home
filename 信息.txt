@@ -1,0 +1,344 @@
+vue + webpack + router 多入口多路由配置方法
+https://www.cnblogs.com/massami1999/p/12679171.html
+
+第一步：当创建问新项目后把根目录的index.html文件和src/router路由文件夹移除
+第二步：在src目录下创建admin文件夹（根据个人习惯创建文件夹也可以叫做views文件夹）
+第三步：在admin文件夹中创建三个文件夹(index, login, manage)；如下：
+    ├─index
+    │  │  App.vue
+    │  │  index.html
+    │  │  index.js
+    │  │
+    │  ├─router
+    │  │      index.js
+    │  │
+    │  └─views
+    │          Index.vue
+    │
+    ├─login
+    │  │  App.vue
+    │  │  login.html
+    │  │  login.js
+    │  │
+    │  ├─router
+    │  │      index.js 
+    │  │
+    │  └─views
+    │          Index.vue
+    │
+    └─manage
+    │  App.vue
+    │  manage.html
+    │  manage.js
+    │
+    ├─router
+    │      index.js
+    │
+    └─views
+            Index.vue
+第四步：打开/build/utils.js文件, 在文件底部增加一下代码：
+
+/*新增多路由页面配置*/
+// glob是webpack安装时依赖的一个第三方模块，还模块允许你使用 *等符号, 例如lib/*.js就是获取lib文件夹下的所有js后缀名的文件
+var glob = require('glob')
+// 页面模板
+var HtmlWebpackPlugin = require('html-webpack-plugin')
+// 取得相应的页面路径，因为之前的配置，所以是src文件夹下的pages文件夹
+var PAGE_PATH = path.resolve(__dirname, '../src/admin')
+// 用于做相应的merge处理
+var merge = require('webpack-merge')
+
+//多入口配置
+// 通过glob模块读取pages文件夹下的所有对应文件夹下的js后缀文件，如果该文件存在
+// 那么就作为入口处理
+exports.entries = function () {
+  var entryFiles = glob.sync(PAGE_PATH + '/*/*.js')
+  var map = {}
+  entryFiles.forEach((filePath) => {
+      var filename = filePath.substring(filePath.lastIndexOf('\/') + 1, filePath.lastIndexOf('.'))
+      map[filename] = filePath
+  })
+  return map
+}
+
+//多页面输出配置
+// 与上面的多页面入口配置相同，读取pages文件夹下的对应的html后缀文件，然后放入数组中
+exports.htmlPlugin = function () {
+  let entryHtml = glob.sync(PAGE_PATH + '/*/*.html')
+  let arr = []
+  entryHtml.forEach((filePath) => {
+      let filename = filePath.substring(filePath.lastIndexOf('\/') + 1, filePath.lastIndexOf('.'))
+      let conf = {
+          // 模板来源
+          template: filePath,
+          // 文件名称
+          filename: filename + '.html',
+          // 页面模板需要加对应的js脚本，如果不加这行则每个页面都会引入所有的js脚本
+          chunks: ['manifest', 'vendor', filename],
+          inject: true
+      }
+      if (process.env.NODE_ENV === 'production') {
+          conf = merge(conf, {
+              minify: {
+                  removeComments: true,
+                  collapseWhitespace: true,
+                  removeAttributeQuotes: true
+              },
+              chunksSortMode: 'dependency'
+          })
+      }
+      arr.push(new HtmlWebpackPlugin(conf))
+  })
+  return arr
+}
+注意：var PAGE_PATH = path.resolve(__dirname, '../src/admin') 这里面的admin是我放置整个项目业务代码的文件夹 这个和第二步创建的文件夹名保持一致
+
+
+第五步：打开/build/webpack.base.conf.js文件, 找到一下代码：
+entry: {
+    app: './src/main.js'
+},
+替换为：
+entry: utils.entries(),
+
+第六步：打开/build/webpack.dev.conf.js文件,  找到一下代码：
+historyApiFallback: {
+    rewrites: [
+    { from: /.*/, to: path.posix.join(config.dev.assetsPublicPath, 'index.html') },
+    ],
+},
+替换为：
+historyApiFallback: {
+    // 多入口多路由配置
+    rewrites: [
+    {from: /^\/index/, to: path.posix.join(config.dev.assetsPublicPath, 'index.html') },
+    {from: /^\/login/, to: path.posix.join(config.dev.assetsPublicPath, 'login.html') },
+    {from: /^\/manage/, to: path.posix.join(config.dev.assetsPublicPath, 'manage.html')},
+    ],
+},
+注意：我的/src/admin/文件夹下对应的是index、login、manage、文件夹中的中路由配置访问的地址分辨是/、/manage、/login 对应的html文件也是这个三个名称；
+
+第七步：打开/build/webpack.dev.conf.js文件, 找到一下代码 
+plugins: [
+    new webpack.DefinePlugin({
+      'process.env': require('../config/dev.env')
+    }),
+    new webpack.HotModuleReplacementPlugin(),
+    new webpack.NamedModulesPlugin(), // HMR shows correct file names in console on update.
+    new webpack.NoEmitOnErrorsPlugin(),
+    // https://github.com/ampedandwired/html-webpack-plugin
+    new HtmlWebpackPlugin({
+      filename: 'index.html',
+      template: 'index.html',
+      inject: true
+    }),
+    // copy custom static assets
+    new CopyWebpackPlugin([
+      {
+        from: path.resolve(__dirname, '../static'),
+        to: config.dev.assetsSubDirectory,
+        ignore: ['.*']
+      }
+    ])
+  ]
+替换换：
+plugins: [
+    new webpack.DefinePlugin({
+      'process.env': require('../config/dev.env')
+    }),
+    new webpack.HotModuleReplacementPlugin(),
+    new CopyWebpackPlugin([
+      {
+        from: path.resolve(__dirname, '../static'),
+        to: config.dev.assetsSubDirectory,
+        ignore: ['.*']
+      }
+    ])
+  /* 添加 .concat(utils.htmlPlugin()) ------------------ */
+  ].concat(utils.htmlPlugin())
+})
+
+第八步：打开/build/webpack.prod.conf.js文件, 找到一下代码:
+plugins: [
+    // http://vuejs.github.io/vue-loader/en/workflow/production.html
+    new webpack.DefinePlugin({
+      'process.env': env
+    }),
+    new UglifyJsPlugin({
+      uglifyOptions: {
+        compress: {
+          warnings: false,
+          drop_debugger: true,//console
+          drop_console: true,
+          pure_funcs: ['console.log']//移除console
+        }
+      },
+      sourceMap: config.build.productionSourceMap,
+      parallel: true
+    }),
+    // extract css into its own file
+    new ExtractTextPlugin({
+      filename: utils.assetsPath('css/[name].' + Version + '.css'),
+      // Setting the following option to `false` will not extract CSS from codesplit chunks.
+      // Their CSS will instead be inserted dynamically with style-loader when the codesplit chunk has been loaded by webpack.
+      // It's currently set to `true` because we are seeing that sourcemaps are included in the codesplit bundle as well when it's `false`, 
+      // increasing file size: https://github.com/vuejs-templates/webpack/issues/1110
+      allChunks: true,
+    }),
+    // Compress extracted CSS. We are using this plugin so that possible
+    // duplicated CSS from different components can be deduped.
+    new OptimizeCSSPlugin({
+      cssProcessorOptions: config.build.productionSourceMap
+        ? { safe: true, map: { inline: false } }
+        : { safe: true,autoprefixer:{remove: false} }
+    }),
+    // generate dist index.html with correct asset hash for caching.
+    // you can customize output by editing /index.html
+    // see https://github.com/ampedandwired/html-webpack-plugin
+    new HtmlWebpackPlugin({
+      filename: process.env.NODE_ENV === 'testing'
+        ? 'index.html'
+        : config.build.index,
+      template: 'index.html',
+      inject: true,
+      minify: {
+        removeComments: true,
+        collapseWhitespace: true,
+        removeAttributeQuotes: true
+        // more options:
+        // https://github.com/kangax/html-minifier#options-quick-reference
+      },
+      // necessary to consistently work with multiple chunks via CommonsChunkPlugin
+      chunksSortMode: 'dependency'
+    }),
+    // keep module.id stable when vendor modules does not change
+    new webpack.HashedModuleIdsPlugin(),
+    // enable scope hoisting
+    new webpack.optimize.ModuleConcatenationPlugin(),
+    // split vendor js into its own file
+    new webpack.optimize.CommonsChunkPlugin({
+      name: 'vendor',
+      minChunks (module) {
+        // any required modules inside node_modules are extracted to vendor
+        return (
+          module.resource &&
+          /\.js$/.test(module.resource) &&
+          module.resource.indexOf(
+            path.join(__dirname, '../node_modules')
+          ) === 0
+        )
+      }
+    }),
+    // extract webpack runtime and module manifest to its own file in order to
+    // prevent vendor hash from being updated whenever app bundle is updated
+    new webpack.optimize.CommonsChunkPlugin({
+      name: 'manifest',
+      minChunks: Infinity
+    }),
+    // This instance extracts shared chunks from code splitted chunks and bundles them
+    // in a separate chunk, similar to the vendor chunk
+    // see: https://webpack.js.org/plugins/commons-chunk-plugin/#extra-async-commons-chunk
+    new webpack.optimize.CommonsChunkPlugin({
+      name: 'app',
+      async: 'vendor-async',
+      children: true,
+      minChunks: 3
+    }),
+
+    // copy custom static assets
+    new CopyWebpackPlugin([
+      {
+        from: path.resolve(__dirname, '../static'),
+        to: config.build.assetsSubDirectory,
+        ignore: ['.*']
+      }
+    ])
+  ]
+替换为：
+plugins: [
+    // http://vuejs.github.io/vue-loader/en/workflow/production.html
+    new webpack.DefinePlugin({
+      'process.env': env
+    }),
+    new UglifyJsPlugin({
+      uglifyOptions: {
+        compress: {
+          warnings: false
+        }
+      },
+      sourceMap: config.build.productionSourceMap,
+      parallel: true
+    }),
+    // extract css into its own file
+    new ExtractTextPlugin({
+      filename: utils.assetsPath('css/[name].[contenthash].css'),
+      // Setting the following option to `false` will not extract CSS from codesplit chunks.
+      // Their CSS will instead be inserted dynamically with style-loader when the codesplit chunk has been loaded by webpack.
+      // It's currently set to `true` because we are seeing that sourcemaps are included in the codesplit bundle as well when it's `false`, 
+      // increasing file size: https://github.com/vuejs-templates/webpack/issues/1110
+      allChunks: true,
+    }),
+    // Compress extracted CSS. We are using this plugin so that possible
+    // duplicated CSS from different components can be deduped.
+    new OptimizeCSSPlugin({
+      cssProcessorOptions: config.build.productionSourceMap
+        ? { safe: true, map: { inline: false } }
+        : { safe: true }
+    }),
+    // keep module.id stable when vendor modules does not change
+    new webpack.HashedModuleIdsPlugin(),
+    // enable scope hoisting
+    new webpack.optimize.ModuleConcatenationPlugin(),
+    // split vendor js into its own file
+    new webpack.optimize.CommonsChunkPlugin({
+      name: 'vendor',
+      minChunks (module) {
+        // any required modules inside node_modules are extracted to vendor
+        return (
+          module.resource &&
+          /\.js$/.test(module.resource) &&
+          module.resource.indexOf(
+            path.join(__dirname, '../node_modules')
+          ) === 0
+        )
+      }
+    }),
+    // extract webpack runtime and module manifest to its own file in order to
+    // prevent vendor hash from being updated whenever app bundle is updated
+    new webpack.optimize.CommonsChunkPlugin({
+      name: 'manifest',
+      minChunks: Infinity
+    }),
+    // This instance extracts shared chunks from code splitted chunks and bundles them
+    // in a separate chunk, similar to the vendor chunk
+    // see: https://webpack.js.org/plugins/commons-chunk-plugin/#extra-async-commons-chunk
+    new webpack.optimize.CommonsChunkPlugin({
+      name: 'app',
+      async: 'vendor-async',
+      children: true,
+      minChunks: 3
+    }),
+    new CopyWebpackPlugin([
+      {
+        from: path.resolve(__dirname, '../static'),
+        to: config.build.assetsSubDirectory,
+        ignore: ['.*']
+      }
+    ])
+   /* 该位置添加 .concat(utils.htmlPlugin()) ------------------- */
+  ].concat(utils.htmlPlugin())
+
+第九步：打开/config/index.js文件, 找到一下代码:
+build: {
+    // Template for index.html
+    index: path.resolve(__dirname, '../luokuanghao/index.html'),
+替换为
+build: {
+    // 多路由多页面配置
+    index: path.resolve(__dirname, '../dist/index.html'),
+    login: path.resolve(__dirname, '../dist/login.html'),
+    manage: path.resolve(__dirname, '../dist/manage.html'),
+
+第十步：运行 npm run dev
+
+
